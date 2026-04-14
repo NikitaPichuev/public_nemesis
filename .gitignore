@@ -1,0 +1,7 @@
+.env
+.wallet.env
+.addresses.env
+proxies.txt
+wallet_index.txt
+__pycache__/
+*.pyc
