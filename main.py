@@ -1736,6 +1736,8 @@ class NemesisOnchainClient:
             print("\n[auto top-up] SEND_TX=false, докупка токенов пропущена.")
             return
 
+        reserved_native_wei = self.w3.to_wei(self.config.tx_value_eth, "ether")
+
         for approval in self.config.approvals:
             token_address = self._checksum(approval["token"])
             required = int(approval["amountWei"])
@@ -1756,13 +1758,18 @@ class NemesisOnchainClient:
             if token_symbol == "WETH":
                 self._wrap_eth_for_weth(required)
             elif token_symbol in TOKENS:
-                self._swap_eth_for_exact_token_topup(token_symbol, missing)
+                self._swap_eth_for_exact_token_topup(token_symbol, missing, reserved_native_wei)
             else:
                 raise ValueError(f"Неизвестный токен для auto top-up: {token_address}")
 
             self._action_pause()
 
-    def _swap_eth_for_exact_token_topup(self, token_symbol: str, missing_token_wei: int) -> int:
+    def _swap_eth_for_exact_token_topup(
+        self,
+        token_symbol: str,
+        missing_token_wei: int,
+        reserved_native_wei: int = 0,
+    ) -> int:
         contract = self._contract(
             self.config.contract_address,
             self._load_abi(self.config.contract_abi_path),
@@ -1771,9 +1778,12 @@ class NemesisOnchainClient:
         value_wei = int(quoted_amounts[0] * 105 // 100)
         wallet = self._checksum(self.config.wallet_address)
         native_balance = self.w3.eth.get_balance(wallet)
-        if native_balance < value_wei:
+        total_required = value_wei + reserved_native_wei
+        if native_balance < total_required:
             raise InsufficientBalanceError(
-                f"Недостаточно ETH для auto top-up {token_symbol}: balance={native_balance}, required={value_wei}"
+                f"Недостаточно ETH для auto top-up {token_symbol}: "
+                f"balance={native_balance}, required={total_required} "
+                f"(top-up={value_wei}, reserved_for_liquidity={reserved_native_wei})"
             )
 
         print(
