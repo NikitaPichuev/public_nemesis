@@ -1,0 +1,16 @@
+{
+  "chainId": 11155111,
+  "rpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+  "subgraphUrl": "https://api.goldsky.com/api/public/project_cmma0sxdrnwdx01ym126h3z8q/subgraphs/nemesis-eth-sepolia/prod/gn",
+  "factory": "0xbf301098692a47cf6861877e9acef55c9653ae50",
+  "router": "0xa1f78bed1a79b9aec972e373e0e7f63d8cace4a8",
+  "weth": "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",
+  "dai": "0xd67215fd6c0890493f34af3c5e4231ce98871fcb",
+  "usdc": "0x10279e6333f9d0EE103F4715b8aaEA75BE61464C",
+  "btc": "0x2591230465a68d924fbcba5e3304c2eda0d52e5b",
+  "minabo": "0xea4daaf49bd55021c23b70b194b4436f199a7606",
+  "nemesis": "0x47b7ed0e04edab477c46543bdf766acea155dd2f",
+  "nem": "0x8d427943b850179300b372483aace7b887845bf3",
+  "one": "0x80d494d084087af738987f2e2807099e35867e10",
+  "wethDaiPool": "0x0b6a0a69b7040b2281730cbae6060b3b1b2ed3a9"
+}
