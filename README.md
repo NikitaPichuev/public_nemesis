@@ -85,6 +85,7 @@ SWAP_DEFAULT_AMOUNT=0.01
 WALLET_ROTATE=true
 WALLET_INDEX_FILE=wallet_index.txt
 WALLET_BATCH_COUNT=1
+SLIPPAGE_BPS=50
 ```
 
 If `WALLET_ROTATE=true`, the client reads private keys line by line from `.wallet.env`. If `PROXY_URL` is empty and `PROXIES_FILE` exists, proxies are matched to wallets by index.
@@ -213,6 +214,6 @@ SEND_TX=false
 
 ## Notes
 
-- The client uses 5% slippage for router quotes where automatic quote calculation is implemented.
+- The client uses `SLIPPAGE_BPS=50` by default, which equals 0.5% slippage, for router quotes where automatic quote calculation is implemented.
 - Liquidity removal uses `amountAMin=0` and `amountBMin=0`.
 - Some experimental pairs or modes may revert depending on pool/manager liquidity and contract rules.

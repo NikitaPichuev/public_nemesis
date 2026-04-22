@@ -424,6 +424,7 @@ class Config:
     wallet_next_index: Optional[int]
     wallet_count: int
     wallet_batch_count: int
+    slippage_bps: int
 
     @classmethod
     def load(cls) -> "Config":
@@ -506,6 +507,7 @@ class Config:
             wallet_next_index=wallet_next_index,
             wallet_count=len(wallet_private_keys),
             wallet_batch_count=env_int("WALLET_BATCH_COUNT", 1) or 1,
+            slippage_bps=env_int("SLIPPAGE_BPS", 50) or 50,
         )
 
     def commit_wallet_rotation(self) -> None:
@@ -656,7 +658,7 @@ class Config:
         if from_symbol == "ETH":
             self.function_name = "swapExactETHForTokens"
             self.function_args = [
-                "$QUOTE_MIN_5PCT",
+                "$QUOTE_MIN_SLIPPAGE",
                 [TOKENS["WETH"]["address"], to_token["address"]],
                 "$WALLET",
                 "$DEADLINE_20M",
@@ -668,7 +670,7 @@ class Config:
             self.function_name = "swapExactTokensForETH"
             self.function_args = [
                 amount_in,
-                "$QUOTE_MIN_5PCT",
+                "$QUOTE_MIN_SLIPPAGE",
                 [from_token["address"], TOKENS["WETH"]["address"]],
                 "$WALLET",
                 "$DEADLINE_20M",
@@ -677,7 +679,7 @@ class Config:
             self.function_name = "swapExactTokensForTokens"
             self.function_args = [
                 amount_in,
-                "$QUOTE_MIN_5PCT",
+                "$QUOTE_MIN_SLIPPAGE",
                 [from_token["address"], to_token["address"]],
                 "$WALLET",
                 "$DEADLINE_20M",
@@ -1435,8 +1437,8 @@ class NemesisOnchainClient:
         borrow_quote = router.functions.getAmountsOut(collateral_amount_wei, [collateral, borrow]).call()[-1]
         borrow_amount_wei = int(borrow_quote * leverage_extra_x10 // 10)
         min_out_quote = router.functions.getAmountsOut(borrow_amount_wei, [borrow, collateral]).call()[-1]
-        amount_out_min = int(min_out_quote * 95 // 100)
-        print(f"Pair-token borrow quote: {borrow_quote} {borrow_symbol}; amountOutMin 5% slippage: {amount_out_min}")
+        amount_out_min = self._min_after_slippage(min_out_quote)
+        print(f"Pair-token borrow quote: {borrow_quote} {borrow_symbol}; amountOutMin {self._slippage_label()} slippage: {amount_out_min}")
         return borrow_amount_wei, amount_out_min
 
     def _prepare_position_collateral(self, collateral_symbol: str, required_amount_wei: int) -> None:
@@ -1594,6 +1596,9 @@ class NemesisOnchainClient:
         if self.config.action_mode not in {"call", "send"}:
             raise ValueError("ACTION_MODE должен быть call или send")
 
+        if not (0 <= self.config.slippage_bps < 10000):
+            raise ValueError("SLIPPAGE_BPS должен быть от 0 до 9999")
+
         if not self.config.contract_address:
             raise ValueError("CONTRACT_ADDRESS не задан")
 
@@ -1691,6 +1696,16 @@ class NemesisOnchainClient:
         if balance < amount:
             raise InsufficientBalanceError(f"Недостаточно ERC-20 баланса: token={token_address}, balance={balance}, required={amount}")
 
+    def _min_after_slippage(self, amount: int) -> int:
+        return int(amount * (10000 - self.config.slippage_bps) // 10000)
+
+    def _max_after_slippage(self, amount: int) -> int:
+        return int(amount * (10000 + self.config.slippage_bps) // 10000)
+
+    def _slippage_label(self) -> str:
+        value = (Decimal(self.config.slippage_bps) / Decimal(100)).normalize()
+        return f"{value:f}%"
+
     def _erc20_balance(self, token_address: str) -> int:
         token = self._contract(
             token_address,
@@ -1706,7 +1721,7 @@ class NemesisOnchainClient:
         )
         value_wei = self.w3.to_wei(eth_amount, "ether")
         path, quoted_amounts = self._best_eth_swap_path(contract, token_symbol, value_wei)
-        amount_out_min = int(quoted_amounts[-1] * 95 // 100)
+        amount_out_min = self._min_after_slippage(quoted_amounts[-1])
         print(f"\n[swap] ETH -> {token_symbol}: value={value_wei} wei, path={self._path_symbols(path)}, quote={quoted_amounts[-1]}, minOut={amount_out_min}")
         tx_hash = self._send_contract_transaction(
             contract=contract,
@@ -1775,7 +1790,7 @@ class NemesisOnchainClient:
             self._load_abi(self.config.contract_abi_path),
         )
         path, quoted_amounts = self._best_eth_input_path(contract, token_symbol, missing_token_wei)
-        value_wei = int(quoted_amounts[0] * 105 // 100)
+        value_wei = self._max_after_slippage(quoted_amounts[0])
         wallet = self._checksum(self.config.wallet_address)
         native_balance = self.w3.eth.get_balance(wallet)
         total_required = value_wei + reserved_native_wei
@@ -2081,9 +2096,9 @@ class NemesisOnchainClient:
             )
             path = [TOKENS["WETH"]["address"], args[0]]
             quoted_amounts = router.functions.getAmountsIn(args[1], path).call()
-            eth_amount_wei = int(quoted_amounts[0] * 105 // 100)
+            eth_amount_wei = self._max_after_slippage(quoted_amounts[0])
             self.config.tx_value_eth = wei_to_token_amount(eth_amount_wei, int(TOKENS["ETH"]["decimals"]))
-            print(f"ETH для ликвидности по quote +5%: {eth_amount_wei} wei ({self.config.tx_value_eth} ETH)")
+            print(f"ETH для ликвидности по quote +{self._slippage_label()}: {eth_amount_wei} wei ({self.config.tx_value_eth} ETH)")
 
         if self.config.function_name == "addLiquidityETH" and args and args[1] == "$QUOTE_TOKEN_FOR_ETH":
             router = self._contract(
@@ -2092,11 +2107,11 @@ class NemesisOnchainClient:
             )
             eth_amount_wei = self.w3.to_wei(self.config.tx_value_eth, "ether")
             quoted_amounts = router.functions.getAmountsOut(eth_amount_wei, [TOKENS["WETH"]["address"], args[0]]).call()
-            token_amount_wei = int(quoted_amounts[-1] * 105 // 100)
+            token_amount_wei = self._max_after_slippage(quoted_amounts[-1])
             args[1] = token_amount_wei
             if self.config.approvals:
                 self.config.approvals[0]["amountWei"] = str(token_amount_wei)
-            print(f"Token для ликвидности по quote +5%: {token_amount_wei} wei")
+            print(f"Token для ликвидности по quote +{self._slippage_label()}: {token_amount_wei} wei")
 
         quote_config = {
             "swapExactETHForTokens": (0, 1, lambda values: self.w3.to_wei(self.config.tx_value_eth, "ether")),
@@ -2104,7 +2119,7 @@ class NemesisOnchainClient:
             "swapExactTokensForTokens": (1, 2, lambda values: values[0]),
         }
         quote_indexes = quote_config.get(self.config.function_name or "")
-        if quote_indexes and args and args[quote_indexes[0]] == "$QUOTE_MIN_5PCT":
+        if quote_indexes and args and args[quote_indexes[0]] in {"$QUOTE_MIN_5PCT", "$QUOTE_MIN_SLIPPAGE"}:
             min_out_idx, path_idx, amount_in_getter = quote_indexes
             path = args[path_idx]
             value_wei = amount_in_getter(args)
@@ -2113,8 +2128,8 @@ class NemesisOnchainClient:
                 self._load_abi(self.config.contract_abi_path),
             )
             quoted_amounts = router.functions.getAmountsOut(value_wei, path).call()
-            args[min_out_idx] = int(quoted_amounts[-1] * 95 // 100)
-            print(f"Quote out: {quoted_amounts[-1]} wei, min out 5% slippage: {args[min_out_idx]} wei")
+            args[min_out_idx] = self._min_after_slippage(quoted_amounts[-1])
+            print(f"Quote out: {quoted_amounts[-1]} wei, min out {self._slippage_label()} slippage: {args[min_out_idx]} wei")
         return args
 
     def _json_dump(self, value: Any) -> str:
